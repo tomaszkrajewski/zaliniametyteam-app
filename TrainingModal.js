@@ -19,31 +19,19 @@ const SportIcon = ({ activityType, activityName, size = 15, color }) => {
     const type = (activityType || '').toUpperCase();
     const name = (activityName || '').toUpperCase();
 
-    // BIEGANIE (Sportowy but)
     if (type.includes('RUN') || name.includes('BIEG'))
         return <MaterialCommunityIcons name="shoe-sneaker" size={size + 2} color={color} />;
-
-    // PŁYWANIE (Pływak z FontAwesome5)
     if (type.includes('SWIM') || name.includes('PŁYW'))
         return <FontAwesome5 name="swimmer" size={size - 1} color={color} />;
-
-    // JOGA / ROZCIĄGANIE (Sylwetka jogina)
     if (type.includes('YOGA') || type.includes('PILATES') || type.includes('FLEXIBILITY') || name.includes('JOGA') || name.includes('ROZCIĄGANIE'))
         return <MaterialCommunityIcons name="yoga" size={size + 1} color={color} />;
-
-    // SIŁOWNIA (Hantel)
     if (type.includes('STRENGTH') || name.includes('SIŁA') || name.includes('TRENING SIŁOWY'))
         return <MaterialCommunityIcons name="dumbbell" size={size} color={color} />;
-
-    // ROWER STACJONARNY
     if (type.includes('INDOOR_CYCLING') || name.includes('STACJONARNY') || name.includes('TAX'))
         return <MaterialCommunityIcons name="bike-fast" size={size + 1} color={color} />;
-
-    // ROWER OUTDOOR
     if (type.includes('CYCLING') || name.includes('ROWER'))
         return <Ionicons name="bicycle-outline" size={size} color={color} />;
 
-    // DOMYŚLNA (Pulsometr)
     return <Ionicons name="fitness-outline" size={size} color={color} />;
 };
 
@@ -55,7 +43,6 @@ export default function TrainingModal({ visible, date, events, onClose, onRefres
 
     const treningEvent = events.find(e => e.rodzaj === 'trening');
 
-    // --- PARSOWANIE WSZYSTKICH AKTYWNOŚCI Z GARMINA ---
     const allGarminEvents = events
         .filter(e => e.rodzaj === 'garmin')
 .map(e => {
@@ -66,16 +53,13 @@ export default function TrainingModal({ visible, date, events, onClose, onRefres
     return { ...e, summaryObj: parsedSummary, lapsArr: parsedLaps };
 });
 
-    // Podział na bieganie i resztę
     const garminEvents = allGarminEvents.filter(e => e.summaryObj.activityType === 'RUNNING');
     const otherGarminEvents = allGarminEvents.filter(e => e.summaryObj.activityType !== 'RUNNING');
 
-    // Logika tytułu (Priorytet: Opis zawodnika z biegania > Nazwa aktywności > Plan trenera)
     const firstGarmin = garminEvents[0] || otherGarminEvents[0];
     const garminDescription = firstGarmin?.opis || firstGarmin?.summaryObj?.activityName;
     const subtitleText = garminDescription || (treningEvent ? treningEvent.nazwa_trening : 'Trening');
 
-    // Flaga wyświetlania feedbacku (tylko gdy jest to dzień z bieganiem lub pusty dzień do uzupełnienia)
     const showFeedback = treningEvent && (garminEvents.length > 0 || otherGarminEvents.length === 0);
 
     useEffect(() => {
@@ -85,7 +69,25 @@ export default function TrainingModal({ visible, date, events, onClose, onRefres
     }
 }, [treningEvent, visible]);
 
-    // --- POMOCNICY DO FORMATOWANIA ---
+    // --- FUNKCJA DEEP-LINKING DO GARMINA ---
+    const openGarminConnect = async (activityId) => {
+        if (!activityId) return;
+
+        const appUrl = `garminconnect://activity/${activityId}`;
+        const webUrl = `https://connect.garmin.com/modern/activity/${activityId}`;
+
+        try {
+            const supported = await Linking.canOpenURL(appUrl);
+            if (supported) {
+                await Linking.openURL(appUrl);
+            } else {
+                await Linking.openURL(webUrl);
+            }
+        } catch (error) {
+            Alert.alert("Błąd", "Nie udało się otworzyć aktywności.");
+        }
+    };
+
     const cleanCoachDesc = (html) => {
         if (!html) return 'Brak opisu treningu.';
         return html.replace(/<br\s*[\/]?>/gi, '\n').replace(/<[^>]*>?/gm, '').trim();
@@ -151,26 +153,6 @@ export default function TrainingModal({ visible, date, events, onClose, onRefres
         }
     };
 
-    const openGarminConnect = async (activityId) => {
-        if (!activityId) return;
-
-        const appUrl = `garminconnect://activity/${activityId}`;
-        const webUrl = `https://connect.garmin.com/modern/activity/${activityId}`;
-
-        try {
-            // Sprawdzamy, czy telefon potrafi otworzyć aplikację Garmin Connect
-            const supported = await Linking.canOpenURL(appUrl);
-            if (supported) {
-                await Linking.openURL(appUrl);
-            } else {
-                // Jeśli nie (brak apki), otwieramy w domyślnej przeglądarce
-                await Linking.openURL(webUrl);
-            }
-        } catch (error) {
-            Alert.alert("Błąd", "Nie udało się otworzyć aktywności.");
-        }
-    };
-
     if (!visible) return null;
 
     return (
@@ -221,23 +203,21 @@ export default function TrainingModal({ visible, date, events, onClose, onRefres
 
         return (
             <View key={`run-${idx}`} style={styles.garminSection}>
-        <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 10 }}>
-    <Text style={[styles.sectionTitle, { marginBottom: 0 }]}>
+        <Text style={[styles.sectionTitle, { marginBottom: 4 }]}>
     <SportIcon activityType={actType} activityName={actName} size={15} color="#38bdf8" />
-        {' '} BIEG
+        {' '} ANALIZA BIEGU
     </Text>
 
+        {/* LINK DO GARMIN CONNECT (Szary kolor dla kontrastu z nagłówkiem) */}
     <TouchableOpacity
-        style={{ flexDirection: 'row', alignItems: 'center' }}
+        style={styles.garminLinkBtn}
         onPress={() => openGarminConnect(summary.activityId)}
     >
-    <Text style={{ color: '#38bdf8', fontSize: 11, fontWeight: '800', marginRight: 4 }}>OTWÓRZ W GARMIN</Text>
-    <Ionicons name="open-outline" size={14} color="#38bdf8" />
+    <Text style={styles.garminLinkText}>GARMIN CONNECT</Text>
+    <Ionicons name="open-outline" size={14} color="#94a3b8" />
         </TouchableOpacity>
-        </View>
 
-        {/* UJEDNOLICONY NAGŁÓWEK DLA BIEGANIA */}
-    <View style={[styles.unifiedCard, { borderColor: '#38bdf8' }]}>
+        <View style={[styles.unifiedCard, { borderColor: '#38bdf8' }]}>
     <View style={styles.unifiedStatCol}>
         <Text style={styles.unifiedStatLabel}>DYSTANS</Text>
         <Text style={styles.unifiedStatValue}>
@@ -259,7 +239,6 @@ export default function TrainingModal({ visible, date, events, onClose, onRefres
         </View>
         </View>
 
-            {/* TABELA PARAMETRÓW (Tempo jako pierwsze, brak HR w detalach, zachowane Up/Down) */}
         <View style={styles.paramsTable}>
             <View style={styles.paramRow}>
             <Text style={styles.paramLabel}>Średnie Tempo</Text>
@@ -275,7 +254,6 @@ export default function TrainingModal({ visible, date, events, onClose, onRefres
         </View>
         </View>
 
-            {/* ODCINKI */}
             {laps.length > 0 && (
             <View style={styles.lapsContainer}>
                 <TouchableOpacity
@@ -337,23 +315,21 @@ export default function TrainingModal({ visible, date, events, onClose, onRefres
 
         return (
             <View key={`other-${idx}`} style={styles.garminSection}>
-        <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 10 }}>
-    <Text style={[styles.sectionTitle, { marginBottom: 0 }]}>
+        <Text style={[styles.sectionTitle, { color: '#818cf8', marginBottom: 4 }]}>
     <SportIcon activityType={actType} activityName={actName} size={15} color="#818cf8" />
         {' '} {actName.toUpperCase()}
     </Text>
 
+        {/* LINK DO GARMIN CONNECT */}
     <TouchableOpacity
-        style={{ flexDirection: 'row', alignItems: 'center' }}
+        style={styles.garminLinkBtn}
         onPress={() => openGarminConnect(summary.activityId)}
     >
-    <Text style={{ color: '#818cf8', fontSize: 11, fontWeight: '800', marginRight: 4 }}>OTWÓRZ W GARMIN</Text>
-    <Ionicons name="open-outline" size={14} color="#818cf8" />
+    <Text style={styles.garminLinkText}>GARMIN CONNECT</Text>
+    <Ionicons name="open-outline" size={14} color="#94a3b8" />
         </TouchableOpacity>
-        </View>
 
-        {/* UJEDNOLICONY NAGŁÓWEK DLA INNYCH SPORTÓW */}
-    <View style={[styles.unifiedCard, { borderColor: '#3730a3' }]}>
+        <View style={[styles.unifiedCard, { borderColor: '#3730a3' }]}>
     <View style={styles.unifiedStatCol}>
         <Text style={styles.unifiedStatLabel}>DYSTANS</Text>
         <Text style={styles.unifiedStatValue}>
@@ -370,7 +346,7 @@ export default function TrainingModal({ visible, date, events, onClose, onRefres
         <View style={styles.unifiedStatCol}>
             <Text style={styles.unifiedStatLabel}>ŚR / MAX HR</Text>
         <Text style={styles.unifiedStatValue}>
-            {hr}/{maxHr} <Text style={styles.unifiedStatUnit}>bpm</Text>
+            {hr}/{maxHr}
         </Text>
         </View>
         </View>
@@ -430,11 +406,16 @@ const styles = StyleSheet.create({
     scrollArea: { flex: 1 },
     section: { marginBottom: 25 },
     garminSection: { marginBottom: 30 },
-    sectionTitle: { color: '#38bdf8', fontSize: 13, fontWeight: '800', marginBottom: 10, letterSpacing: 1 },
+
+    sectionTitle: { color: '#38bdf8', fontSize: 13, fontWeight: '800', marginBottom: 10, letterSpacing: 1, textTransform: 'uppercase' },
+
+    // Style dla przycisku linku (Zmieniony kolor tekstu na szary #94a3b8)
+    garminLinkBtn: { flexDirection: 'row', alignItems: 'center', marginBottom: 12 },
+    garminLinkText: { color: '#94a3b8', fontSize: 11, fontWeight: '800', marginRight: 4, letterSpacing: 0.5 },
+
     infoBox: { backgroundColor: '#1e293b', padding: 15, borderRadius: 15, borderLeftWidth: 4, borderLeftColor: '#38bdf8' },
     infoText: { color: '#cbd5e1', fontSize: 15, lineHeight: 22 },
 
-    // --- UJEDNOLICONA KARTA (Dystans, Czas, Tętno) ---
     unifiedCard: { backgroundColor: '#1e293b', paddingVertical: 22, paddingHorizontal: 10, borderRadius: 15, flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', borderWidth: 1, marginBottom: 15 },
     unifiedStatCol: { flex: 1, alignItems: 'center' },
     unifiedStatDivider: { width: 1, height: '100%', backgroundColor: '#334155' },
@@ -442,14 +423,12 @@ const styles = StyleSheet.create({
     unifiedStatValue: { color: '#f8fafc', fontSize: 24, fontWeight: '900' },
     unifiedStatUnit: { color: '#94a3b8', fontSize: 13, fontWeight: '700' },
 
-    // --- PARAMETRY TABELA ---
     paramsTable: { backgroundColor: '#1e293b', borderRadius: 15, paddingHorizontal: 15, marginBottom: 15, borderWidth: 1, borderColor: '#334155' },
     paramRow: { flexDirection: 'row', justifyContent: 'space-between', paddingVertical: 12, borderBottomWidth: 1, borderColor: '#334155' },
     paramLabel: { color: '#cbd5e1', fontSize: 14, fontWeight: '600' },
     paramValue: { color: '#fff', fontSize: 14, fontWeight: '800' },
     paramUnit: { color: '#64748b', fontSize: 12, fontWeight: '600' },
 
-    // --- ODCINKI TABELA ---
     lapsContainer: { backgroundColor: '#161e2e', borderRadius: 15, overflow: 'hidden', borderWidth: 1, borderColor: '#334155' },
     lapsHeaderTitleRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', padding: 12, backgroundColor: '#0f172a' },
     lapsTitle: { color: '#94a3b8', fontSize: 11, fontWeight: '800' },
@@ -470,7 +449,6 @@ const styles = StyleSheet.create({
     colKad: { width: 35 },
     colKrok: { width: 35 },
 
-    // STYLE FEEDBACKU
     label: { color: '#64748b', fontSize: 11, fontWeight: '800', marginBottom: 10, textTransform: 'uppercase' },
     chipsContainer: { flexDirection: 'row', justifyContent: 'space-between', marginBottom: 20 },
     chip: { backgroundColor: '#1e293b', paddingVertical: 8, flex: 1, marginHorizontal: 2, borderRadius: 10, alignItems: 'center', borderWidth: 1, borderColor: '#334155' },

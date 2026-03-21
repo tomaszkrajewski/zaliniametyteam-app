@@ -27,10 +27,14 @@ export default function App() {
     const [lastUpdated, setLastUpdated] = useState('');
     const [isKeyboardVisible, setKeyboardVisible] = useState(false);
 
-    const [allRawEvents, setAllRawEvents] = useState([]); // Stores Garmini & everything else
-    const [selectedDate, setSelectedDate] = useState(null); // Triggers the modal
+    const [allRawEvents, setAllRawEvents] = useState([]);
+    const [selectedDate, setSelectedDate] = useState(null);
 
+    // --- REFERENCJE ---
     const chatListRef = useRef(null);
+    const flatListRef = useRef(null); // Referencja do naszej osi czasu
+    const [initialScrollDone, setInitialScrollDone] = useState(false); // Flaga jednorazowego scrolla
+
     const ID_TRENER = 1;
     const FLAG = 1;
 
@@ -63,6 +67,28 @@ export default function App() {
         hideSub.remove();
     };
 }, []);
+
+    // --- AUTOMATYCZNE PRZEWIJANIE DO "DZIŚ" ---
+    useEffect(() => {
+        // Scrollujemy dopiero, gdy są dane, aktywna jest zakładka planu i nie zrobiliśmy tego wcześniej
+        if (timeline.length > 0 && !initialScrollDone && activeTab === 'plan') {
+        setTimeout(() => {
+            scrollToToday();
+        setInitialScrollDone(true);
+    }, 600); // 600ms opóźnienia, by lista zdążyła się poprawnie wyrenderować
+    }
+}, [timeline, activeTab, initialScrollDone]);
+
+    const scrollToToday = () => {
+        const idx = timeline.findIndex(item => item.data === todayDateStr);
+        if (idx !== -1 && flatListRef.current) {
+            flatListRef.current.scrollToIndex({
+                index: idx,
+                animated: true,
+                viewPosition: 0.5 // Ustawia kartę idealnie na środku ekranu!
+            });
+        }
+    };
 
     const getApi = () => axios.create({
         baseURL: 'https://planbieganie.pl',
@@ -136,18 +162,12 @@ export default function App() {
     };
 
     const processTimeline = (data) => {
-        // Bezpieczne sprawdzanie danych
         const safeData = Array.isArray(data) ? data : [];
         setAllRawEvents(safeData);
 
         const now = new Date(); now.setHours(0,0,0,0);
-
-        // Zapewniamy widoczność od 10 dni temu do 3 miesięcy w przód
-        const startRange = new Date(now);
-        startRange.setDate(now.getDate() - 10);
-
-        const endRange = new Date(now);
-        endRange.setMonth(now.getMonth() + 3);
+        const startRange = new Date(now); startRange.setDate(now.getDate() - 10);
+        const endRange = new Date(now); endRange.setMonth(now.getMonth() + 3);
 
         const filtered = safeData.filter(t => {
             if ((t.rodzaj !== "trening" && t.rodzaj !== "start") || !t.data) return false;
@@ -156,7 +176,6 @@ export default function App() {
         return itemDate >= startRange && itemDate <= endRange;
     });
 
-        // WSTRZYKIWANIE 10 OSTATNICH DNI (żeby pokazać cross-trening w dni wolne od biegu)
         for (let i = 0; i <= 10; i++) {
             const d = new Date(now);
             d.setDate(d.getDate() - i);
@@ -167,7 +186,6 @@ export default function App() {
             }
         }
 
-        // Sortowanie chronologiczne
         filtered.sort((a, b) => a.data.split('-').reverse().join('').localeCompare(b.data.split('-').reverse().join('')));
 
         const nextRace = filtered.find(item => item.rodzaj === 'start');
@@ -214,7 +232,17 @@ export default function App() {
 
         <View style={styles.headerArea}>
         <View>
-        <Text style={styles.headerTitle}>{activeTab === 'plan' ? 'Timeline' : 'Chat'}</Text>
+        <View style={{ flexDirection: 'row', alignItems: 'center' }}>
+<Text style={styles.headerTitle}>{activeTab === 'plan' ? 'Timeline' : 'Chat'}</Text>
+
+    {/* Ręczny przycisk nawrotu do dzisiejszego dnia! */}
+    {activeTab === 'plan' && (
+    <TouchableOpacity onPress={scrollToToday} style={styles.todayBtn}>
+        <Ionicons name="today" size={20} color="#38bdf8" />
+        </TouchableOpacity>
+    )}
+</View>
+
     <View style={styles.headerSubRow}>
         {daysToRace !== null && <Text style={styles.raceCountdown}>🏆 Race in {daysToRace}d </Text>}
     <Text style={styles.lastUpdated}>• Update: {lastUpdated}</Text>
@@ -229,16 +257,23 @@ export default function App() {
         <View style={{ flex: 1 }}>
     {activeTab === 'plan' ? (
         <FlatList
+        ref={flatListRef}
         data={timeline}
         keyExtractor={(_, idx) => idx.toString()}
         contentContainerStyle={{ paddingBottom: 20 }}
         refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor="#38bdf8" colors={["#38bdf8"]} progressViewOffset={20} />}
+        // Fallback na wypadek gdy dany dzień jeszcze się nie zrenderował (dynamiczne wysokości list)
+        onScrollToIndexFailed={(info) => {
+        const wait = new Promise(resolve => setTimeout(resolve, 300));
+        wait.then(() => {
+            flatListRef.current?.scrollToIndex({ index: info.index, animated: true, viewPosition: 0.5 });
+    });
+    }}
         renderItem={({ item }) => {
         const isRace = item.rodzaj === "start";
         const isPlan = item.rodzaj === "trening";
         const isToday = item.data === todayDateStr;
 
-        // --- AGREGACJA GARMINA ---
         const garminForDay = allRawEvents.filter(e => e.data === item.data && e.rodzaj === 'garmin');
         const decodedGarmin = garminForDay.map(g => {
             let sum = {};
@@ -249,30 +284,24 @@ export default function App() {
         const runs = decodedGarmin.filter(g => g.summaryObj.activityType === 'RUNNING');
         const others = decodedGarmin.filter(g => g.summaryObj.activityType && g.summaryObj.activityType !== 'RUNNING');
 
-        // UKRYWANIE pustych wstrzykniętych dni
         if (item.rodzaj === 'past_garmin' && decodedGarmin.length === 0) return null;
 
         const isOtherOnly = !isPlan && !isRace && runs.length === 0 && others.length > 0;
 
         let title = "";
         let details = "";
-        let accentColor = isRace ? "#fbbf24" : (isOtherOnly ? "#818cf8" : "#38bdf8"); // Cross-trening dostaje fiolet
+        let accentColor = isRace ? "#fbbf24" : (isOtherOnly ? "#818cf8" : "#38bdf8");
 
         if (isOtherOnly) {
-            // 2/ KONKATENACJA NAZW (np. "Joga + Indoor Cycling")
             title = others.map(o => (o.summaryObj.activityName || o.summaryObj.activityType).toUpperCase()).join(" + ");
-
-            // 3/ DETALE (Typ i Czas)
             details = others.map(o => {
                 const typeFormatted = o.summaryObj.activityType.replace(/_/g, ' ');
             const time = Math.round((o.summaryObj.durationInSeconds || 0) / 60);
             return `${typeFormatted} (${time} min)`;
         }).join("  •  ");
         } else {
-            // BIEGANIE LUB PLAN TRENERA
             title = isRace ? item.nazwa_start : (item.nazwa_trening || 'Trening biegowy');
 
-            // Jeśli bieg poza planem (wstrzyknięty dzień)
             if (!title && item.rodzaj === 'past_garmin' && runs.length > 0) {
                 title = (runs[0].summaryObj.activityName || 'Niezaplanowany bieg').toUpperCase();
             }
@@ -281,7 +310,6 @@ export default function App() {
             const rawDesc = (runs.length > 0 && runs[0].opis) ? runs[0].opis : fallbackDesc;
             details = rawDesc ? rawDesc.replace(/<[^>]*>?/gm, '').trim() : '';
 
-            // Dopisanie do biegu ewentualnego cross-treningu
             if (others.length > 0) {
                 const othersDetails = others.map(o => `${o.summaryObj.activityType.replace(/_/g, ' ')} (${Math.round((o.summaryObj.durationInSeconds || 0)/ 60)}m)`).join(", ");
                 details = details ? `${details}\n+ ${othersDetails}` : `+ ${othersDetails}`;
@@ -294,7 +322,7 @@ export default function App() {
                 styles.card,
             isRace && styles.raceCard,
         isToday && !isRace && styles.todayCard,
-        isOtherOnly && { borderColor: '#3730a3', borderWidth: 1 } // Obwódka
+        isOtherOnly && { borderColor: '#3730a3', borderWidth: 1 }
     ]}>
     <View style={[
                 styles.accent,
@@ -375,8 +403,7 @@ export default function App() {
     <View style={styles.androidBuffer} />
     </View>
 
-    {/* Wywołanie naszego poprawionego Modala */}
-<TrainingModal
+    <TrainingModal
     visible={!!selectedDate}
     date={selectedDate}
     events={allRawEvents.filter(e => e.data === selectedDate)}
@@ -400,6 +427,7 @@ const styles = StyleSheet.create({
 
     headerArea: { paddingHorizontal: 20, paddingTop: 10, paddingBottom: 15, backgroundColor: '#0f172a', flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', borderBottomWidth: 1, borderBottomColor: '#1e293b' },
     headerTitle: { color: '#fff', fontSize: 26, fontWeight: '900' },
+    todayBtn: { marginLeft: 12, marginTop: 4, padding: 4, backgroundColor: '#1e293b', borderRadius: 8, borderWidth: 1, borderColor: '#334155' },
     headerSubRow: { flexDirection: 'row', alignItems: 'center', marginTop: 2 },
     raceCountdown: { color: '#fbbf24', fontSize: 12, fontWeight: '800' },
     lastUpdated: { color: '#64748b', fontSize: 12, fontWeight: '600' },
