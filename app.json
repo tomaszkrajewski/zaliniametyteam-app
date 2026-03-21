@@ -13,7 +13,10 @@
       "backgroundColor": "#111c2e"
     },
     "ios": {
-      "supportsTablet": true
+      "supportsTablet": true,
+      "infoPlist": {
+          "LSApplicationQueriesSchemes": ["garminconnect"]
+        }
     },
     "android": {
       "package": "com.ktsystems.eliteplan",
