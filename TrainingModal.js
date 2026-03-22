@@ -1,7 +1,7 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import {
     Modal, View, Text, StyleSheet, TouchableOpacity,
-    TextInput, ScrollView, ActivityIndicator, Alert, KeyboardAvoidingView, Platform, Linking
+    TextInput, ScrollView, ActivityIndicator, Alert, KeyboardAvoidingView, Platform, Linking, Keyboard
 } from 'react-native';
 import { Ionicons, FontAwesome5, MaterialCommunityIcons } from '@expo/vector-icons';
 import axios from 'axios';
@@ -14,7 +14,6 @@ const FATIGUE_OPTIONS = [
     { value: '4', label: 'DNF' },
 ];
 
-// --- INTELIGENTNY KOMPONENT IKON SPORTOWYCH ---
 const SportIcon = ({ activityType, activityName, size = 15, color }) => {
     const type = (activityType || '').toUpperCase();
     const name = (activityName || '').toUpperCase();
@@ -40,6 +39,8 @@ export default function TrainingModal({ visible, date, events, onClose, onRefres
     const [zmeczenie, setZmeczenie] = useState('0');
     const [loading, setLoading] = useState(false);
     const [lapsCollapsed, setLapsCollapsed] = useState(false);
+
+    const scrollRef = useRef(null);
 
     const treningEvent = events.find(e => e.rodzaj === 'trening');
 
@@ -69,7 +70,22 @@ export default function TrainingModal({ visible, date, events, onClose, onRefres
     }
 }, [treningEvent, visible]);
 
-    // --- FUNKCJA DEEP-LINKING DO GARMINA ---
+    // --- NAPRAWA KLAWIATURY: Solidne nasłuchiwanie na w pełni zakończone animacje ---
+    useEffect(() => {
+        const showSub = Keyboard.addListener('keyboardDidShow', () => {
+            scrollRef.current?.scrollToEnd({ animated: true });
+});
+
+    const hideSub = Keyboard.addListener('keyboardDidHide', () => {
+        scrollRef.current?.scrollToEnd({ animated: true });
+});
+
+    return () => {
+        showSub.remove();
+        hideSub.remove();
+    };
+}, []);
+
     const openGarminConnect = async (activityId) => {
         if (!activityId) return;
 
@@ -133,6 +149,7 @@ export default function TrainingModal({ visible, date, events, onClose, onRefres
     };
 
     const submitFeedback = async () => {
+        Keyboard.dismiss(); // Zwija klawiaturę przed pokazaniem loadingu
         if (!treningEvent?.id_treningu) return;
         setLoading(true);
         try {
@@ -174,7 +191,12 @@ export default function TrainingModal({ visible, date, events, onClose, onRefres
         </TouchableOpacity>
         </View>
 
-        <ScrollView style={styles.scrollArea} showsVerticalScrollIndicator={false}>
+        <ScrollView
+    ref={scrollRef}
+    style={styles.scrollArea}
+    showsVerticalScrollIndicator={false}
+    keyboardShouldPersistTaps="handled"
+        >
         {/* PLAN TRENERA */}
     {treningEvent && (
     <View style={styles.section}>
@@ -208,12 +230,11 @@ export default function TrainingModal({ visible, date, events, onClose, onRefres
         {' '} ANALIZA BIEGU
     </Text>
 
-        {/* LINK DO GARMIN CONNECT (Szary kolor dla kontrastu z nagłówkiem) */}
     <TouchableOpacity
         style={styles.garminLinkBtn}
         onPress={() => openGarminConnect(summary.activityId)}
     >
-    <Text style={styles.garminLinkText}>GARMIN CONNECT</Text>
+    <Text style={styles.garminLinkText}>OTWÓRZ W GARMIN CONNECT</Text>
     <Ionicons name="open-outline" size={14} color="#94a3b8" />
         </TouchableOpacity>
 
@@ -302,7 +323,6 @@ export default function TrainingModal({ visible, date, events, onClose, onRefres
         );
     })}
 
-    {/* INNE AKTYWNOŚCI (CROSS-TRENING) */}
     {otherGarminEvents.map((garmin, idx) => {
         const summary = garmin.summaryObj;
         const actName = summary.activityName || 'Trening uzupełniający';
@@ -320,12 +340,11 @@ export default function TrainingModal({ visible, date, events, onClose, onRefres
         {' '} {actName.toUpperCase()}
     </Text>
 
-        {/* LINK DO GARMIN CONNECT */}
     <TouchableOpacity
         style={styles.garminLinkBtn}
         onPress={() => openGarminConnect(summary.activityId)}
     >
-    <Text style={styles.garminLinkText}>GARMIN CONNECT</Text>
+    <Text style={styles.garminLinkText}>OTWÓRZ W GARMIN CONNECT</Text>
     <Ionicons name="open-outline" size={14} color="#94a3b8" />
         </TouchableOpacity>
 
@@ -354,7 +373,6 @@ export default function TrainingModal({ visible, date, events, onClose, onRefres
         );
     })}
 
-    {/* FEEDBACK (UKRYTY DLA DNI TYLKO CROSS-TRENINGOWYCH) */}
     {showFeedback && (
     <View style={styles.section}>
         <Text style={styles.sectionTitle}><Ionicons name="chatbubble-ellipses" size={14} /> TWÓJ FEEDBACK</Text>
@@ -364,13 +382,17 @@ export default function TrainingModal({ visible, date, events, onClose, onRefres
                 <TouchableOpacity
             key={opt.value}
             style={[styles.chip, zmeczenie === opt.value && styles.chipActive]}
-        onPress={() => setZmeczenie(opt.value)}
+        onPress={() => {
+        setZmeczenie(opt.value);
+        Keyboard.dismiss();
+    }}
     >
     <Text style={[styles.chipText, zmeczenie === opt.value && styles.chipTextActive]}>{opt.label}</Text>
     </TouchableOpacity>
     ))}
     </View>
 
+        {/* Usunięto zawodne onFocus */}
     <TextInput
         style={styles.textArea}
         multiline
@@ -385,7 +407,10 @@ export default function TrainingModal({ visible, date, events, onClose, onRefres
     </TouchableOpacity>
     </View>
     )}
-</ScrollView>
+
+<View style={{ height: 20 }} />
+
+    </ScrollView>
     </View>
     </KeyboardAvoidingView>
     </Modal>
@@ -409,7 +434,6 @@ const styles = StyleSheet.create({
 
     sectionTitle: { color: '#38bdf8', fontSize: 13, fontWeight: '800', marginBottom: 10, letterSpacing: 1, textTransform: 'uppercase' },
 
-    // Style dla przycisku linku (Zmieniony kolor tekstu na szary #94a3b8)
     garminLinkBtn: { flexDirection: 'row', alignItems: 'center', marginBottom: 12 },
     garminLinkText: { color: '#94a3b8', fontSize: 11, fontWeight: '800', marginRight: 4, letterSpacing: 0.5 },
 

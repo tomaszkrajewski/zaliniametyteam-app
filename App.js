@@ -30,15 +30,13 @@ export default function App() {
     const [allRawEvents, setAllRawEvents] = useState([]);
     const [selectedDate, setSelectedDate] = useState(null);
 
-    // --- REFERENCJE ---
     const chatListRef = useRef(null);
-    const flatListRef = useRef(null); // Referencja do naszej osi czasu
-    const [initialScrollDone, setInitialScrollDone] = useState(false); // Flaga jednorazowego scrolla
+    const flatListRef = useRef(null);
+    const [initialScrollDone, setInitialScrollDone] = useState(false);
 
     const ID_TRENER = 1;
     const FLAG = 1;
 
-    // --- HELPER: Get Today's Date in API Format (DD-MM-YYYY) ---
     const getTodayString = () => {
         const today = new Date();
         const d = String(today.getDate()).padStart(2, '0');
@@ -68,25 +66,27 @@ export default function App() {
     };
 }, []);
 
-    // --- AUTOMATYCZNE PRZEWIJANIE DO "DZIŚ" ---
     useEffect(() => {
-        // Scrollujemy dopiero, gdy są dane, aktywna jest zakładka planu i nie zrobiliśmy tego wcześniej
         if (timeline.length > 0 && !initialScrollDone && activeTab === 'plan') {
         setTimeout(() => {
             scrollToToday();
         setInitialScrollDone(true);
-    }, 600); // 600ms opóźnienia, by lista zdążyła się poprawnie wyrenderować
+    }, 600);
     }
 }, [timeline, activeTab, initialScrollDone]);
 
     const scrollToToday = () => {
         const idx = timeline.findIndex(item => item.data === todayDateStr);
         if (idx !== -1 && flatListRef.current) {
-            flatListRef.current.scrollToIndex({
-                index: idx,
-                animated: true,
-                viewPosition: 0.5 // Ustawia kartę idealnie na środku ekranu!
-            });
+            try {
+                flatListRef.current.scrollToIndex({
+                    index: idx,
+                    animated: true,
+                    viewPosition: 0.5
+                });
+            } catch (error) {
+                console.log("Scroll to index failed, handled safely.", error);
+            }
         }
     };
 
@@ -235,7 +235,6 @@ export default function App() {
         <View style={{ flexDirection: 'row', alignItems: 'center' }}>
 <Text style={styles.headerTitle}>{activeTab === 'plan' ? 'Timeline' : 'Chat'}</Text>
 
-    {/* Ręczny przycisk nawrotu do dzisiejszego dnia! */}
     {activeTab === 'plan' && (
     <TouchableOpacity onPress={scrollToToday} style={styles.todayBtn}>
         <Ionicons name="today" size={20} color="#38bdf8" />
@@ -253,7 +252,12 @@ export default function App() {
         </TouchableOpacity>
         </View>
 
-        <KeyboardAvoidingView behavior="padding" style={{ flex: 1 }} keyboardVerticalOffset={0}>
+    {/* NAPRAWA: Zmienione behavior i KeyboardAvoidingView zamyka się PRZED Modalem */}
+<KeyboardAvoidingView
+    behavior={Platform.OS === 'ios' ? 'padding' : undefined}
+    style={{ flex: 1 }}
+    keyboardVerticalOffset={0}
+        >
         <View style={{ flex: 1 }}>
     {activeTab === 'plan' ? (
         <FlatList
@@ -261,14 +265,18 @@ export default function App() {
         data={timeline}
         keyExtractor={(_, idx) => idx.toString()}
         contentContainerStyle={{ paddingBottom: 20 }}
-        refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor="#38bdf8" colors={["#38bdf8"]} progressViewOffset={20} />}
-        // Fallback na wypadek gdy dany dzień jeszcze się nie zrenderował (dynamiczne wysokości list)
+        initialNumToRender={150}
         onScrollToIndexFailed={(info) => {
-        const wait = new Promise(resolve => setTimeout(resolve, 300));
+        const wait = new Promise(resolve => setTimeout(resolve, 500));
         wait.then(() => {
-            flatListRef.current?.scrollToIndex({ index: info.index, animated: true, viewPosition: 0.5 });
+            if (flatListRef.current) {
+            try {
+                flatListRef.current.scrollToIndex({ index: info.index, animated: true, viewPosition: 0.5 });
+            } catch (e) {}
+        }
     });
     }}
+        refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor="#38bdf8" colors={["#38bdf8"]} progressViewOffset={20} />}
         renderItem={({ item }) => {
         const isRace = item.rodzaj === "start";
         const isPlan = item.rodzaj === "trening";
@@ -402,15 +410,17 @@ export default function App() {
     </View>
     <View style={styles.androidBuffer} />
     </View>
+    </KeyboardAvoidingView>
 
-    <TrainingModal
+    {/* NAPRAWA: Modal wyciągnięty kompletnie NA ZEWNĄTRZ KeyboardAvoidingView */}
+<TrainingModal
     visible={!!selectedDate}
     date={selectedDate}
     events={allRawEvents.filter(e => e.data === selectedDate)}
     onClose={() => setSelectedDate(null)}
     onRefresh={onRefresh}
     />
-    </KeyboardAvoidingView>
+
     </View>
 );
 }
