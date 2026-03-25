@@ -1,461 +1,246 @@
-import React, { useState, useEffect, useCallback, useRef } from 'react';
+/**
+ * KEYBOARD HANDLING PROOF-OF-CONCEPT
+ *
+ * Pattern: Manual keyboard height tracking (no KeyboardAvoidingView)
+ *
+ * Why this works reliably on both platforms:
+ * - KeyboardAvoidingView has known bugs with behavior='height' on Android
+ *   (layout doesn't restore after dismiss) and behavior='padding' miscalculates
+ *   offsets when there are headers/status bars above it.
+ * - With edgeToEdgeEnabled:true on Android, the system's adjustResize may not
+ *   work, and changing softwareKeyboardLayoutMode globally affects ALL screens
+ *   including modals.
+ * - This pattern gives each component full control over its own keyboard
+ *   avoidance without any global side effects.
+ *
+ * How it works:
+ * 1. Listen to Keyboard events (keyboardWillShow on iOS, keyboardDidShow on Android)
+ * 2. Store the keyboard height from event.endCoordinates.height
+ * 3. Apply it as marginBottom on the input container
+ * 4. The flex layout naturally shrinks the chat list to make room
+ * 5. On keyboard hide, marginBottom goes back to 0 and layout fully restores
+ */
+
+import React, { useState, useEffect, useRef } from 'react';
 import {
     StyleSheet, Text, View, TextInput, TouchableOpacity,
-    FlatList, ActivityIndicator, Alert, RefreshControl,
-    StatusBar as RNStatusBar, KeyboardAvoidingView, Platform, Keyboard
+    FlatList, Platform, Keyboard,
+    StatusBar as RNStatusBar
 } from 'react-native';
-import axios from 'axios';
-import * as SecureStore from 'expo-secure-store';
 import { Ionicons } from '@expo/vector-icons';
 
-import TrainingModal from './TrainingModal';
+const STATUSBAR_HEIGHT = Platform.OS === 'android' ? (RNStatusBar.currentHeight || 0) : 45;
 
-const STATUSBAR_HEIGHT = Platform.OS === 'android' ? RNStatusBar.currentHeight : 45;
+// Sample data for the PoC
+const SAMPLE_MESSAGES = [
+    { id: '1', text: 'Czesc! Jak trening?', side: 'left', time: '10:00' },
+    { id: '2', text: 'Bylo super, 10km w 48min', side: 'right', time: '10:01' },
+    { id: '3', text: 'Swietny wynik!', side: 'left', time: '10:02' },
+    { id: '4', text: 'Dziekuje, nogi troche bolaly po wczorajszym', side: 'right', time: '10:03' },
+    { id: '5', text: 'To normalne po interwalkach', side: 'left', time: '10:04' },
+    { id: '6', text: 'Jutro odpoczynek', side: 'right', time: '10:05' },
+    { id: '7', text: 'Tak, regeneracja jest wazna', side: 'left', time: '10:06' },
+    { id: '8', text: 'W piatek tempo run 8km', side: 'left', time: '10:07' },
+    { id: '9', text: 'OK, bede gotowy', side: 'right', time: '10:08' },
+    { id: '10', text: 'Pamietaj o rozgrzewce!', side: 'left', time: '10:09' },
+    { id: '11', text: 'Do tego klepanie z komputera mnie meczy, a przeciez mozna ladnie dyktowac', side: 'right', time: '10:10' },
+];
+
+const SAMPLE_PLAN = [
+    { id: '1', title: 'Bieg poranny', date: '24-03-2026', details: '5km, luzne tempo' },
+    { id: '2', title: 'Interwalki', date: '25-03-2026', details: '8x400m @ tempo 5K' },
+    { id: '3', title: 'Odpoczynek', date: '26-03-2026', details: 'Aktywna regeneracja' },
+    { id: '4', title: 'Tempo Run', date: '27-03-2026', details: '10km w tempie maratonskim' },
+    { id: '5', title: 'Dlugi bieg', date: '28-03-2026', details: '18km, spokojne tempo' },
+    { id: '6', title: 'Rozciaganie', date: '29-03-2026', details: 'Yoga 30 min' },
+    { id: '7', title: 'Bieg regeneracyjny', date: '30-03-2026', details: '6km bardzo wolno' },
+];
 
 export default function App() {
-    const [email, setEmail] = useState('');
-    const [password, setPassword] = useState('');
-    const [isLoggedIn, setIsLoggedIn] = useState(false);
-    const [loading, setLoading] = useState(true);
-    const [refreshing, setRefreshing] = useState(false);
     const [activeTab, setActiveTab] = useState('plan');
-    const [timeline, setTimeline] = useState([]);
-    const [messages, setMessages] = useState([]);
+    const [messages, setMessages] = useState(SAMPLE_MESSAGES);
     const [newMessage, setNewMessage] = useState('');
-    const [userId, setUserId] = useState(null);
-    const [daysToRace, setDaysToRace] = useState(null);
-    const [lastUpdated, setLastUpdated] = useState('');
-    const [isKeyboardVisible, setKeyboardVisible] = useState(false);
-
-    const [allRawEvents, setAllRawEvents] = useState([]);
-    const [selectedDate, setSelectedDate] = useState(null);
-
+    const [keyboardHeight, setKeyboardHeight] = useState(0);
+    const [isKeyboardVisible, setIsKeyboardVisible] = useState(false);
     const chatListRef = useRef(null);
-    const flatListRef = useRef(null);
-    const [initialScrollDone, setInitialScrollDone] = useState(false);
-
-    const ID_TRENER = 1;
-    const FLAG = 1;
-
-    const getTodayString = () => {
-        const today = new Date();
-        const d = String(today.getDate()).padStart(2, '0');
-        const m = String(today.getMonth() + 1).padStart(2, '0');
-        const y = today.getFullYear();
-        return `${d}-${m}-${y}`;
-    };
-    const todayDateStr = getTodayString();
 
     useEffect(() => {
-        const showSub = Keyboard.addListener("keyboardDidShow", () => setKeyboardVisible(true));
-    const hideSub = Keyboard.addListener("keyboardDidHide", () => setKeyboardVisible(false));
+        // iOS: keyboardWillShow/Hide fires BEFORE animation starts (smooth)
+        // Android: keyboardDid* fires AFTER animation completes (only reliable option)
+        const showEvent = Platform.OS === 'ios' ? 'keyboardWillShow' : 'keyboardDidShow';
+        const hideEvent = Platform.OS === 'ios' ? 'keyboardWillHide' : 'keyboardDidHide';
 
-    const initApp = async () => {
-        const u = await SecureStore.getItemAsync('uEmail');
-        const p = await SecureStore.getItemAsync('uPass');
-        if (u && p) {
-            setEmail(u); setPassword(p);
-            await handleLogin(u, p, false);
-        } else { setLoading(false); }
-    };
-    initApp();
+        const showSub = Keyboard.addListener(showEvent, (e) => {
+            setKeyboardHeight(e.endCoordinates.height);
+            setIsKeyboardVisible(true);
+        });
+        const hideSub = Keyboard.addListener(hideEvent, () => {
+            setKeyboardHeight(0);
+            setIsKeyboardVisible(false);
+        });
 
-    return () => {
-        showSub.remove();
-        hideSub.remove();
-    };
-}, []);
+        return () => {
+            showSub.remove();
+            hideSub.remove();
+        };
+    }, []);
 
+    // Scroll chat to end when keyboard appears
     useEffect(() => {
-        if (timeline.length > 0 && !initialScrollDone && activeTab === 'plan') {
-        setTimeout(() => {
-            scrollToToday();
-        setInitialScrollDone(true);
-    }, 600);
-    }
-}, [timeline, activeTab, initialScrollDone]);
-
-    const scrollToToday = () => {
-        const idx = timeline.findIndex(item => item.data === todayDateStr);
-        if (idx !== -1 && flatListRef.current) {
-            try {
-                flatListRef.current.scrollToIndex({
-                    index: idx,
-                    animated: true,
-                    viewPosition: 0.5
-                });
-            } catch (error) {
-                console.log("Scroll to index failed, handled safely.", error);
-            }
+        if (isKeyboardVisible && activeTab === 'chat') {
+            setTimeout(() => {
+                chatListRef.current?.scrollToEnd({ animated: true });
+            }, 300);
         }
+    }, [isKeyboardVisible, activeTab]);
+
+    const sendMessage = () => {
+        if (!newMessage.trim()) return;
+        const msg = {
+            id: String(Date.now()),
+            text: newMessage.trim(),
+            side: 'right',
+            time: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+        };
+        setMessages(prev => [...prev, msg]);
+        setNewMessage('');
     };
-
-    const getApi = () => axios.create({
-        baseURL: 'https://planbieganie.pl',
-        headers: { 'Content-Type': 'application/x-www-form-urlencoded', 'X-Requested-With': 'XMLHttpRequest' },
-        withCredentials: true
-    });
-
-    const handleLogin = async (u = email, p = password, isSilent = false) => {
-        if (!isSilent) setLoading(true);
-        try {
-            const api = getApi();
-            const loginRes = await api.post('/zaliniamety/login', `username=${encodeURIComponent(u)}&password=${encodeURIComponent(p)}`);
-            const idMatch = loginRes.data.match(/id="session_id"[^>]+value="(\d+)"/);
-            const zawodnikId = idMatch ? idMatch[1] : null;
-
-            if (!zawodnikId) throw new Error("Auth Failed");
-            setUserId(zawodnikId);
-            await SecureStore.setItemAsync('uEmail', u);
-            await SecureStore.setItemAsync('uPass', p);
-
-            const planRes = await api.post('/zaliniamety/files/treningi.php', `zawodnik=${zawodnikId}`);
-            processTimeline(planRes.data);
-
-            const dashRes = await api.get('/zaliniamety/');
-            parseMessages(dashRes.data);
-
-            const now = new Date();
-            setLastUpdated(`${now.getHours()}:${now.getMinutes().toString().padStart(2, '0')}`);
-            setIsLoggedIn(true);
-        } catch (err) {
-            if (!isSilent) Alert.alert("Error", "Login failed.");
-        } finally {
-            setLoading(false);
-            setRefreshing(false);
-        }
-    };
-
-    const handleLogout = async () => {
-        Alert.alert("Logout", "Confirm log out?", [
-            { text: "Cancel", style: "cancel" },
-            { text: "Log Out", style: "destructive", onPress: async () => {
-                await SecureStore.deleteItemAsync('uEmail');
-        await SecureStore.deleteItemAsync('uPass');
-        setIsLoggedIn(false);
-        setUserId(null);
-    }}
-    ]);
-    };
-
-    const parseMessages = (html) => {
-        const msgArray = [];
-        const blocks = html.split(/<div class="chat-content-(leftside|rightside)">/g);
-        for (let i = 1; i < blocks.length; i += 2) {
-            const side = blocks[i];
-            const content = blocks[i + 1];
-            const timeMatch = content.match(/class="mb-0 chat-time[^>]*>(.*?)<\/p>/);
-            const textMatch = content.match(/class="chat-(left|right)-msg">(.*?)<\/p>/s);
-            if (timeMatch && textMatch) {
-                const rawTime = timeMatch[1].replace(/<[^>]*>/g, '').trim();
-                const dMatch = rawTime.match(/(\d{2})\.(\d{2})\.(\d{4})\s+(\d{2}):(\d{2}):(\d{2})/);
-                let sortKey = 0;
-                if (dMatch) {
-                    const [_, d, m, y, hh, mm, ss] = dMatch;
-                    sortKey = parseInt(`${y}${m}${d}${hh}${mm}${ss}`);
-                }
-                msgArray.push({ side, senderInfo: rawTime, text: textMatch[2].replace(/<br\s*\/?>/gi, '\n').replace(/<[^>]*>/g, '').trim(), sortKey });
-            }
-        }
-        const sorted = msgArray.sort((a, b) => a.sortKey - b.sortKey);
-        setMessages(sorted.slice(-15));
-    };
-
-    const processTimeline = (data) => {
-        const safeData = Array.isArray(data) ? data : [];
-        setAllRawEvents(safeData);
-
-        const now = new Date(); now.setHours(0,0,0,0);
-        const startRange = new Date(now); startRange.setDate(now.getDate() - 10);
-        const endRange = new Date(now); endRange.setMonth(now.getMonth() + 3);
-
-        const filtered = safeData.filter(t => {
-            if ((t.rodzaj !== "trening" && t.rodzaj !== "start") || !t.data) return false;
-        const [d, m, y] = t.data.split('-').map(Number);
-        const itemDate = new Date(y, m - 1, d);
-        return itemDate >= startRange && itemDate <= endRange;
-    });
-
-        for (let i = 0; i <= 10; i++) {
-            const d = new Date(now);
-            d.setDate(d.getDate() - i);
-            const dateStr = `${String(d.getDate()).padStart(2, '0')}-${String(d.getMonth() + 1).padStart(2, '0')}-${d.getFullYear()}`;
-
-            if (!filtered.find(e => e.data === dateStr)) {
-                filtered.push({ data: dateStr, rodzaj: 'past_garmin' });
-            }
-        }
-
-        filtered.sort((a, b) => a.data.split('-').reverse().join('').localeCompare(b.data.split('-').reverse().join('')));
-
-        const nextRace = filtered.find(item => item.rodzaj === 'start');
-        if (nextRace) {
-            const [rd, rm, ry] = nextRace.data.split('-').map(Number);
-            const diff = Math.ceil((new Date(ry, rm - 1, rd) - now) / (1000 * 60 * 60 * 24));
-            setDaysToRace(diff >= 0 ? diff : null);
-        }
-        setTimeline(filtered);
-    };
-
-    const sendMessage = async () => {
-        if (!newMessage.trim() || !userId) return;
-        try {
-            const api = getApi();
-            const params = new URLSearchParams({ id_zawodnik: userId, id_trener: ID_TRENER, tekst: newMessage.replace(/\n/g, '<br />'), flaga: FLAG });
-            setNewMessage('');
-            const res = await api.post('/zaliniamety/files/dodajChat.php', params.toString());
-            if (res.data) parseMessages(res.data);
-        } catch (err) { Alert.alert("Error", "Message not sent."); }
-    };
-
-    const onRefresh = useCallback(() => {
-        setRefreshing(true);
-    handleLogin(email, password, true);
-}, [email, password]);
-
-    if (loading) return <View style={styles.center}><ActivityIndicator size="large" color="#38bdf8" /></View>;
-
-    if (!isLoggedIn) {
-        return (
-            <View style={[styles.authView, { paddingTop: STATUSBAR_HEIGHT }]}>
-    <Text style={styles.heroTitle}>ElitePlan</Text>
-            <TextInput style={styles.input} placeholder="User" value={email} onChangeText={setEmail} placeholderTextColor="#475569" autoCapitalize="none" />
-            <TextInput style={styles.input} placeholder="Pass" value={password} onChangeText={setPassword} secureTextEntry placeholderTextColor="#475569" />
-            <TouchableOpacity style={styles.loginBtn} onPress={() => handleLogin()}><Text style={styles.loginBtnText}>Login</Text></TouchableOpacity>
-        </View>
-    );
-    }
 
     return (
         <View style={[styles.mainView, { paddingTop: STATUSBAR_HEIGHT }]}>
-<RNStatusBar barStyle="light-content" backgroundColor="#0f172a" />
+            <RNStatusBar barStyle="light-content" backgroundColor="#0f172a" />
 
-        <View style={styles.headerArea}>
-        <View>
-        <View style={{ flexDirection: 'row', alignItems: 'center' }}>
-<Text style={styles.headerTitle}>{activeTab === 'plan' ? 'Timeline' : 'Chat'}</Text>
+            {/* HEADER */}
+            <View style={styles.headerArea}>
+                <Text style={styles.headerTitle}>
+                    {activeTab === 'plan' ? 'Timeline' : 'Chat'}
+                </Text>
+                <Text style={styles.headerSubtitle}>Keyboard PoC</Text>
+            </View>
 
-    {activeTab === 'plan' && (
-    <TouchableOpacity onPress={scrollToToday} style={styles.todayBtn}>
-        <Ionicons name="today" size={20} color="#38bdf8" />
-        </TouchableOpacity>
-    )}
-</View>
+            {/* CONTENT AREA - flex:1 takes all remaining space */}
+            <View style={{ flex: 1 }}>
+                {activeTab === 'plan' ? (
+                    /* ===== PLAN TAB ===== */
+                    <FlatList
+                        data={SAMPLE_PLAN}
+                        keyExtractor={item => item.id}
+                        contentContainerStyle={{ paddingBottom: 20 }}
+                        renderItem={({ item }) => (
+                            <View style={styles.card}>
+                                <View style={styles.accent} />
+                                <View style={styles.cardContent}>
+                                    <Text style={styles.cardDate}>{item.date}</Text>
+                                    <Text style={styles.cardTitle}>{item.title}</Text>
+                                    <Text style={styles.cardDetails}>{item.details}</Text>
+                                </View>
+                            </View>
+                        )}
+                    />
+                ) : (
+                    /* ===== CHAT TAB =====
+                       Key layout: flex column with
+                       FlatList (flex:1) + InputWrapper (with dynamic marginBottom).
+                       When keyboard shows, marginBottom pushes input up,
+                       FlatList shrinks to fill remaining space.
+                       When keyboard hides, marginBottom=0 and layout fully restores. */
+                    <View style={{ flex: 1 }}>
+                        <FlatList
+                            ref={chatListRef}
+                            data={messages}
+                            keyExtractor={item => item.id}
+                            style={{ flex: 1 }}
+                            contentContainerStyle={{ padding: 15, paddingBottom: 10 }}
+                            onContentSizeChange={() => {
+                                chatListRef.current?.scrollToEnd({ animated: true });
+                            }}
+                            renderItem={({ item }) => (
+                                <View style={[
+                                    styles.msgContainer,
+                                    item.side === 'right' ? styles.msgRight : styles.msgLeft
+                                ]}>
+                                    <Text style={styles.msgTime}>{item.time}</Text>
+                                    <View style={[
+                                        styles.msgBubble,
+                                        item.side === 'right' ? styles.bubbleRight : styles.bubbleLeft
+                                    ]}>
+                                        <Text style={styles.msgText}>{item.text}</Text>
+                                    </View>
+                                </View>
+                            )}
+                        />
 
-    <View style={styles.headerSubRow}>
-        {daysToRace !== null && <Text style={styles.raceCountdown}>🏆 Race in {daysToRace}d </Text>}
-    <Text style={styles.lastUpdated}>• Update: {lastUpdated}</Text>
-    </View>
-    </View>
-    <TouchableOpacity onPress={handleLogout} style={styles.logoutBtn}>
-        <Ionicons name="log-out-outline" size={24} color="#f87171" />
-        </TouchableOpacity>
+                        {/* INPUT BAR with dynamic marginBottom for keyboard.
+                            marginBottom = keyboardHeight pushes this view up.
+                            The FlatList above (flex:1) shrinks accordingly.
+                            No KeyboardAvoidingView needed. */}
+                        <View style={[
+                            styles.inputWrapper,
+                            { marginBottom: keyboardHeight }
+                        ]}>
+                            <TextInput
+                                style={styles.chatInput}
+                                placeholder="Message..."
+                                placeholderTextColor="#64748b"
+                                multiline
+                                value={newMessage}
+                                onChangeText={setNewMessage}
+                            />
+                            <TouchableOpacity style={styles.sendBtn} onPress={sendMessage}>
+                                <Ionicons name="send" size={18} color="#0f172a" />
+                            </TouchableOpacity>
+                        </View>
+                    </View>
+                )}
+            </View>
+
+            {/* BOTTOM NAV - conditionally rendered (unmounted when keyboard visible).
+                This avoids the display:'none' bug where the element stays in layout. */}
+            {!isKeyboardVisible && (
+                <View style={styles.bottomNavContainer}>
+                    <View style={styles.tabBar}>
+                        <TouchableOpacity style={styles.tabItem} onPress={() => setActiveTab('plan')}>
+                            <Ionicons
+                                name={activeTab === 'plan' ? "calendar" : "calendar-outline"}
+                                size={26}
+                                color={activeTab === 'plan' ? '#38bdf8' : '#94a3b8'}
+                            />
+                            <Text style={[styles.tabLabel, activeTab === 'plan' && styles.tabLabelActive]}>Plan</Text>
+                        </TouchableOpacity>
+                        <TouchableOpacity style={styles.tabItem} onPress={() => setActiveTab('chat')}>
+                            <Ionicons
+                                name={activeTab === 'chat' ? "chatbubbles" : "chatbubbles-outline"}
+                                size={26}
+                                color={activeTab === 'chat' ? '#38bdf8' : '#94a3b8'}
+                            />
+                            <Text style={[styles.tabLabel, activeTab === 'chat' && styles.tabLabelActive]}>Chat</Text>
+                        </TouchableOpacity>
+                    </View>
+                    <View style={styles.androidBuffer} />
+                </View>
+            )}
         </View>
-
-    {/* NAPRAWA: Zmienione behavior i KeyboardAvoidingView zamyka się PRZED Modalem */}
-<KeyboardAvoidingView
-    behavior={Platform.OS === 'ios' ? 'padding' : undefined}
-    style={{ flex: 1 }}
-    keyboardVerticalOffset={0}
-        >
-        <View style={{ flex: 1 }}>
-    {activeTab === 'plan' ? (
-        <FlatList
-        ref={flatListRef}
-        data={timeline}
-        keyExtractor={(_, idx) => idx.toString()}
-        contentContainerStyle={{ paddingBottom: 20 }}
-        initialNumToRender={150}
-        onScrollToIndexFailed={(info) => {
-        const wait = new Promise(resolve => setTimeout(resolve, 500));
-        wait.then(() => {
-            if (flatListRef.current) {
-            try {
-                flatListRef.current.scrollToIndex({ index: info.index, animated: true, viewPosition: 0.5 });
-            } catch (e) {}
-        }
-    });
-    }}
-        refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor="#38bdf8" colors={["#38bdf8"]} progressViewOffset={20} />}
-        renderItem={({ item }) => {
-        const isRace = item.rodzaj === "start";
-        const isPlan = item.rodzaj === "trening";
-        const isToday = item.data === todayDateStr;
-
-        const garminForDay = allRawEvents.filter(e => e.data === item.data && e.rodzaj === 'garmin');
-        const decodedGarmin = garminForDay.map(g => {
-            let sum = {};
-        try { sum = g.summary ? JSON.parse(g.summary) : {}; } catch(e){}
-        return { ...g, summaryObj: sum };
-    });
-
-        const runs = decodedGarmin.filter(g => g.summaryObj.activityType === 'RUNNING');
-        const others = decodedGarmin.filter(g => g.summaryObj.activityType && g.summaryObj.activityType !== 'RUNNING');
-
-        if (item.rodzaj === 'past_garmin' && decodedGarmin.length === 0) return null;
-
-        const isOtherOnly = !isPlan && !isRace && runs.length === 0 && others.length > 0;
-
-        let title = "";
-        let details = "";
-        let accentColor = isRace ? "#fbbf24" : (isOtherOnly ? "#818cf8" : "#38bdf8");
-
-        if (isOtherOnly) {
-            title = others.map(o => (o.summaryObj.activityName || o.summaryObj.activityType).toUpperCase()).join(" + ");
-            details = others.map(o => {
-                const typeFormatted = o.summaryObj.activityType.replace(/_/g, ' ');
-            const time = Math.round((o.summaryObj.durationInSeconds || 0) / 60);
-            return `${typeFormatted} (${time} min)`;
-        }).join("  •  ");
-        } else {
-            title = isRace ? item.nazwa_start : (item.nazwa_trening || 'Trening biegowy');
-
-            if (!title && item.rodzaj === 'past_garmin' && runs.length > 0) {
-                title = (runs[0].summaryObj.activityName || 'Niezaplanowany bieg').toUpperCase();
-            }
-
-            const fallbackDesc = item.opis || item.opis_treningu || '';
-            const rawDesc = (runs.length > 0 && runs[0].opis) ? runs[0].opis : fallbackDesc;
-            details = rawDesc ? rawDesc.replace(/<[^>]*>?/gm, '').trim() : '';
-
-            if (others.length > 0) {
-                const othersDetails = others.map(o => `${o.summaryObj.activityType.replace(/_/g, ' ')} (${Math.round((o.summaryObj.durationInSeconds || 0)/ 60)}m)`).join(", ");
-                details = details ? `${details}\n+ ${othersDetails}` : `+ ${othersDetails}`;
-            }
-        }
-
-        return (
-            <TouchableOpacity activeOpacity={0.8} onPress={() => setSelectedDate(item.data)}>
-    <View style={[
-                styles.card,
-            isRace && styles.raceCard,
-        isToday && !isRace && styles.todayCard,
-        isOtherOnly && { borderColor: '#3730a3', borderWidth: 1 }
-    ]}>
-    <View style={[
-                styles.accent,
-            isRace && styles.raceAccent,
-        isToday && !isRace && styles.todayAccent,
-        isOtherOnly && { backgroundColor: '#818cf8' }
-    ]} />
-        <View style={styles.cardContent}>
-            <Text style={[
-                styles.cardDate,
-            isRace && styles.raceDate,
-        isToday && !isRace && styles.todayDate,
-        isOtherOnly && { color: '#818cf8' }
-    ]}>
-        {isToday ? `DZIŚ • ${item.data}` : item.data}
-    </Text>
-        <Text style={[styles.cardTitle, isRace && styles.raceTitle]}>
-        {title}
-    </Text>
-        {details ? (
-            <Text style={styles.cardDetails}>{details}</Text>
-        ) : null}
-    </View>
-        </View>
-        </TouchableOpacity>
     );
-    }}
-        />
-    ) : (
-    <View style={{ flex: 1 }}>
-    <FlatList
-        ref={chatListRef}
-        data={messages}
-        keyExtractor={(_, idx) => idx.toString()}
-        style={{ flex: 1 }}
-        contentContainerStyle={{ padding: 15, paddingBottom: 40 }}
-        onContentSizeChange={() => chatListRef.current?.scrollToEnd({ animated: true })}
-        onLayout={() => chatListRef.current?.scrollToEnd({ animated: true })}
-        refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor="#38bdf8" colors={["#38bdf8"]} />}
-        renderItem={({ item }) => (
-    <View style={[styles.msgContainer, item.side === 'rightside' ? styles.msgRight : styles.msgLeft]}>
-    <Text style={styles.msgTime}>{item.senderInfo}</Text>
-        <View style={[styles.msgBubble, item.side === 'rightside' ? styles.bubbleRight : styles.bubbleLeft]}>
-    <Text style={styles.msgText}>{item.text}</Text>
-        </View>
-        </View>
-    )}
-        />
-        <View style={styles.inputWrapper}>
-        <TextInput
-        style={styles.chatInput}
-        placeholder="Message..."
-        placeholderTextColor="#64748b"
-        multiline
-        value={newMessage}
-        onChangeText={setNewMessage}
-        onFocus={() => setTimeout(() => chatListRef.current?.scrollToEnd({ animated: true }), 100)}
-        />
-        <TouchableOpacity style={styles.sendBtn} onPress={sendMessage}>
-        <Ionicons name="send" size={18} color="#0f172a" />
-        </TouchableOpacity>
-        </View>
-        </View>
-    )}
-</View>
-
-    <View style={[styles.bottomNavContainer, isKeyboardVisible && { display: 'none' }]}>
-<View style={styles.tabBar}>
-        <TouchableOpacity style={styles.tabItem} onPress={() => setActiveTab('plan')}>
-<Ionicons name={activeTab === 'plan' ? "calendar" : "calendar-outline"} size={26} color={activeTab === 'plan' ? '#38bdf8' : '#94a3b8'} />
-    <Text style={[styles.tabLabel, activeTab === 'plan' && styles.tabLabelActive]}>Plan</Text>
-    </TouchableOpacity>
-    <TouchableOpacity style={styles.tabItem} onPress={() => setActiveTab('chat')}>
-<Ionicons name={activeTab === 'chat' ? "chatbubbles" : "chatbubbles-outline"} size={26} color={activeTab === 'chat' ? '#38bdf8' : '#94a3b8'} />
-    <Text style={[styles.tabLabel, activeTab === 'chat' && styles.tabLabelActive]}>Chat</Text>
-    </TouchableOpacity>
-    </View>
-    <View style={styles.androidBuffer} />
-    </View>
-    </KeyboardAvoidingView>
-
-    {/* NAPRAWA: Modal wyciągnięty kompletnie NA ZEWNĄTRZ KeyboardAvoidingView */}
-<TrainingModal
-    visible={!!selectedDate}
-    date={selectedDate}
-    events={allRawEvents.filter(e => e.data === selectedDate)}
-    onClose={() => setSelectedDate(null)}
-    onRefresh={onRefresh}
-    />
-
-    </View>
-);
 }
 
 const styles = StyleSheet.create({
-    center: { flex: 1, backgroundColor: '#0f172a', justifyContent: 'center' },
-    authView: { flex: 1, backgroundColor: '#0f172a', justifyContent: 'center', padding: 30 },
-    heroTitle: { fontSize: 42, fontWeight: '900', color: '#fff', textAlign: 'center', marginBottom: 40 },
-    input: { backgroundColor: '#1e293b', color: '#fff', padding: 18, borderRadius: 20, marginBottom: 12, borderWidth: 1, borderColor: '#334155' },
-    loginBtn: { backgroundColor: '#38bdf8', padding: 20, borderRadius: 20, alignItems: 'center' },
-    loginBtnText: { color: '#0f172a', fontWeight: '800', fontSize: 16 },
-
     mainView: { flex: 1, backgroundColor: '#0f172a' },
 
-    headerArea: { paddingHorizontal: 20, paddingTop: 10, paddingBottom: 15, backgroundColor: '#0f172a', flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', borderBottomWidth: 1, borderBottomColor: '#1e293b' },
+    headerArea: {
+        paddingHorizontal: 20, paddingTop: 10, paddingBottom: 15,
+        backgroundColor: '#0f172a', borderBottomWidth: 1, borderBottomColor: '#1e293b',
+    },
     headerTitle: { color: '#fff', fontSize: 26, fontWeight: '900' },
-    todayBtn: { marginLeft: 12, marginTop: 4, padding: 4, backgroundColor: '#1e293b', borderRadius: 8, borderWidth: 1, borderColor: '#334155' },
-    headerSubRow: { flexDirection: 'row', alignItems: 'center', marginTop: 2 },
-    raceCountdown: { color: '#fbbf24', fontSize: 12, fontWeight: '800' },
-    lastUpdated: { color: '#64748b', fontSize: 12, fontWeight: '600' },
-    logoutBtn: { padding: 5 },
+    headerSubtitle: { color: '#64748b', fontSize: 12, fontWeight: '600', marginTop: 2 },
 
-    card: { backgroundColor: '#1e293b', marginHorizontal: 15, marginTop: 12, borderRadius: 15, flexDirection: 'row', overflow: 'hidden' },
-
-    todayCard: { borderColor: '#10b981', borderWidth: 1, backgroundColor: '#064e3b' },
-    todayAccent: { backgroundColor: '#10b981' },
-    todayDate: { color: '#10b981', fontWeight: '900' },
-
-    raceCard: { backgroundColor: '#2d2613', borderColor: '#fbbf24', borderWidth: 1 },
+    card: {
+        backgroundColor: '#1e293b', marginHorizontal: 15, marginTop: 12,
+        borderRadius: 15, flexDirection: 'row', overflow: 'hidden',
+    },
     accent: { width: 5, backgroundColor: '#38bdf8' },
-    raceAccent: { backgroundColor: '#fbbf24' },
     cardContent: { padding: 16, flex: 1 },
     cardDate: { color: '#64748b', fontSize: 11, fontWeight: '800', marginBottom: 4, textTransform: 'uppercase' },
     cardTitle: { color: '#f8fafc', fontSize: 16, fontWeight: '700' },
-
     cardDetails: { color: '#94a3b8', fontSize: 13, marginTop: 6, lineHeight: 18 },
 
     msgContainer: { marginBottom: 15, maxWidth: '85%' },
@@ -467,12 +252,25 @@ const styles = StyleSheet.create({
     msgText: { color: '#f1f5f9', fontSize: 14, lineHeight: 20 },
     msgTime: { color: '#64748b', fontSize: 10, marginBottom: 4 },
 
-    inputWrapper: { flexDirection: 'row', alignItems: 'center', padding: 12, backgroundColor: '#1e293b', borderTopWidth: 1, borderColor: '#334155' },
-    chatInput: { flex: 1, backgroundColor: '#0f172a', color: '#fff', paddingHorizontal: 15, borderRadius: 20, maxHeight: 100, fontSize: 15, paddingVertical: 8, marginRight: 10 },
-    sendBtn: { backgroundColor: '#38bdf8', width: 40, height: 40, borderRadius: 20, justifyContent: 'center', alignItems: 'center' },
+    inputWrapper: {
+        flexDirection: 'row', alignItems: 'center', padding: 12,
+        backgroundColor: '#1e293b', borderTopWidth: 1, borderColor: '#334155',
+    },
+    chatInput: {
+        flex: 1, backgroundColor: '#0f172a', color: '#fff',
+        paddingHorizontal: 15, borderRadius: 20, maxHeight: 100,
+        fontSize: 15, paddingVertical: 8, marginRight: 10,
+    },
+    sendBtn: {
+        backgroundColor: '#38bdf8', width: 40, height: 40,
+        borderRadius: 20, justifyContent: 'center', alignItems: 'center',
+    },
 
     bottomNavContainer: { backgroundColor: '#1e293b', borderTopWidth: 1, borderColor: '#334155' },
-    tabBar: { flexDirection: 'row', height: 65, justifyContent: 'space-around', alignItems: 'center', paddingTop: 5, paddingBottom: 5 },
+    tabBar: {
+        flexDirection: 'row', height: 65, justifyContent: 'space-around',
+        alignItems: 'center', paddingTop: 5, paddingBottom: 5,
+    },
     androidBuffer: { height: Platform.OS === 'android' ? 40 : 20, backgroundColor: '#1e293b' },
     tabItem: { alignItems: 'center', justifyContent: 'center', flex: 1 },
     tabLabel: { fontSize: 10, color: '#94a3b8', fontWeight: '700', marginTop: 4 },
