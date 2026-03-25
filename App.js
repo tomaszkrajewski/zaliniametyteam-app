@@ -259,9 +259,9 @@ export default function App() {
 
     {/* NAPRAWA: Zmienione behavior i KeyboardAvoidingView zamyka się PRZED Modalem */}
 <KeyboardAvoidingView
-    behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+    behavior={Platform.OS === 'ios' ? 'padding' : undefined}
     style={{ flex: 1 }}
-    keyboardVerticalOffset={Platform.OS === 'ios' ? STATUSBAR_HEIGHT + 65 : STATUSBAR_HEIGHT}
+    keyboardVerticalOffset={Platform.OS === 'ios' ? STATUSBAR_HEIGHT + 65 : 0}
         >
         <View style={{ flex: 1 }}>
     {activeTab === 'plan' ? (
