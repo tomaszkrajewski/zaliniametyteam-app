@@ -47,8 +47,13 @@ export default function App() {
     const todayDateStr = getTodayString();
 
     useEffect(() => {
-        const showSub = Keyboard.addListener("keyboardDidShow", () => setKeyboardVisible(true));
-    const hideSub = Keyboard.addListener("keyboardDidHide", () => setKeyboardVisible(false));
+        const showEvent = Platform.OS === 'ios' ? 'keyboardWillShow' : 'keyboardDidShow';
+        const hideEvent = Platform.OS === 'ios' ? 'keyboardWillHide' : 'keyboardDidHide';
+        const showSub = Keyboard.addListener(showEvent, () => {
+            setKeyboardVisible(true);
+            setTimeout(() => chatListRef.current?.scrollToEnd({ animated: true }), 300);
+        });
+        const hideSub = Keyboard.addListener(hideEvent, () => setKeyboardVisible(false));
 
     const initApp = async () => {
         const u = await SecureStore.getItemAsync('uEmail');
@@ -254,9 +259,9 @@ export default function App() {
 
     {/* NAPRAWA: Zmienione behavior i KeyboardAvoidingView zamyka się PRZED Modalem */}
 <KeyboardAvoidingView
-    behavior={Platform.OS === 'ios' ? 'padding' : undefined}
+    behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
     style={{ flex: 1 }}
-    keyboardVerticalOffset={0}
+    keyboardVerticalOffset={Platform.OS === 'ios' ? STATUSBAR_HEIGHT + 65 : STATUSBAR_HEIGHT}
         >
         <View style={{ flex: 1 }}>
     {activeTab === 'plan' ? (
@@ -368,7 +373,6 @@ export default function App() {
         style={{ flex: 1 }}
         contentContainerStyle={{ padding: 15, paddingBottom: 40 }}
         onContentSizeChange={() => chatListRef.current?.scrollToEnd({ animated: true })}
-        onLayout={() => chatListRef.current?.scrollToEnd({ animated: true })}
         refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor="#38bdf8" colors={["#38bdf8"]} />}
         renderItem={({ item }) => (
     <View style={[styles.msgContainer, item.side === 'rightside' ? styles.msgRight : styles.msgLeft]}>
@@ -387,7 +391,7 @@ export default function App() {
         multiline
         value={newMessage}
         onChangeText={setNewMessage}
-        onFocus={() => setTimeout(() => chatListRef.current?.scrollToEnd({ animated: true }), 100)}
+        onFocus={() => setTimeout(() => chatListRef.current?.scrollToEnd({ animated: true }), 300)}
         />
         <TouchableOpacity style={styles.sendBtn} onPress={sendMessage}>
         <Ionicons name="send" size={18} color="#0f172a" />
@@ -397,7 +401,8 @@ export default function App() {
     )}
 </View>
 
-    <View style={[styles.bottomNavContainer, isKeyboardVisible && { display: 'none' }]}>
+    {!isKeyboardVisible && (
+    <View style={styles.bottomNavContainer}>
 <View style={styles.tabBar}>
         <TouchableOpacity style={styles.tabItem} onPress={() => setActiveTab('plan')}>
 <Ionicons name={activeTab === 'plan' ? "calendar" : "calendar-outline"} size={26} color={activeTab === 'plan' ? '#38bdf8' : '#94a3b8'} />
@@ -410,6 +415,7 @@ export default function App() {
     </View>
     <View style={styles.androidBuffer} />
     </View>
+    )}
     </KeyboardAvoidingView>
 
     {/* NAPRAWA: Modal wyciągnięty kompletnie NA ZEWNĄTRZ KeyboardAvoidingView */}
