@@ -171,12 +171,13 @@ export default function App() {
                         />
 
                         {/* INPUT BAR with dynamic marginBottom for keyboard.
-                            marginBottom = keyboardHeight pushes this view up.
-                            The FlatList above (flex:1) shrinks accordingly.
-                            No KeyboardAvoidingView needed. */}
+                            iOS: marginBottom = keyboardHeight pushes input above keyboard
+                              (iOS doesn't auto-resize the window for keyboard)
+                            Android: system adjustResize already shrinks the window,
+                              so we do NOT add marginBottom (would cause double offset) */}
                         <View style={[
                             styles.inputWrapper,
-                            { marginBottom: keyboardHeight }
+                            Platform.OS === 'ios' && { marginBottom: keyboardHeight }
                         ]}>
                             <TextInput
                                 style={styles.chatInput}
