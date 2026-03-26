@@ -1,6 +1,6 @@
 {
   "expo": {
-    "name": "Elite Planbieganie",
+    "name": "#zaliniametyteam app",
     "slug": "snack-26f142bc-cbb6-4ecb-9aed-ea30222e1997",
     "version": "1.0.0",
     "orientation": "portrait",
@@ -13,6 +13,7 @@
       "backgroundColor": "#111c2e"
     },
     "ios": {
+      "bundleIdentifier": "com.ktsystems.eliteplan",
       "supportsTablet": true,
       "infoPlist": {
           "LSApplicationQueriesSchemes": ["garminconnect"]

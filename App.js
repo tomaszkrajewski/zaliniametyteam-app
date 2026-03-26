@@ -2,7 +2,7 @@ import React, { useState, useEffect, useCallback, useRef } from 'react';
 import {
     StyleSheet, Text, View, TextInput, TouchableOpacity,
     FlatList, ActivityIndicator, Alert, RefreshControl,
-    StatusBar as RNStatusBar, KeyboardAvoidingView, Platform, Keyboard
+    StatusBar as RNStatusBar, Platform, Keyboard
 } from 'react-native';
 import axios from 'axios';
 import * as SecureStore from 'expo-secure-store';
@@ -25,7 +25,10 @@ export default function App() {
     const [userId, setUserId] = useState(null);
     const [daysToRace, setDaysToRace] = useState(null);
     const [lastUpdated, setLastUpdated] = useState('');
-    const [isKeyboardVisible, setKeyboardVisible] = useState(false);
+
+    // Wzorzec z PoC: Dokładne śledzenie wysokości klawiatury
+    const [keyboardHeight, setKeyboardHeight] = useState(0);
+    const [isKeyboardVisible, setIsKeyboardVisible] = useState(false);
 
     const [allRawEvents, setAllRawEvents] = useState([]);
     const [selectedDate, setSelectedDate] = useState(null);
@@ -47,13 +50,20 @@ export default function App() {
     const todayDateStr = getTodayString();
 
     useEffect(() => {
+        // Wzorzec z PoC: iOS używa 'Will' (płynniej), Android musi czekać na 'Did'
         const showEvent = Platform.OS === 'ios' ? 'keyboardWillShow' : 'keyboardDidShow';
-        const hideEvent = Platform.OS === 'ios' ? 'keyboardWillHide' : 'keyboardDidHide';
-        const showSub = Keyboard.addListener(showEvent, () => {
-            setKeyboardVisible(true);
-            setTimeout(() => chatListRef.current?.scrollToEnd({ animated: true }), 300);
-        });
-        const hideSub = Keyboard.addListener(hideEvent, () => setKeyboardVisible(false));
+    const hideEvent = Platform.OS === 'ios' ? 'keyboardWillHide' : 'keyboardDidHide';
+
+    const showSub = Keyboard.addListener(showEvent, (e) => {
+        // Dodajemy bufor 50px zgodnie z Twoim PoC dla bezpieczeństwa i oddychania UI
+        setKeyboardHeight(e.endCoordinates.height + 50);
+    setIsKeyboardVisible(true);
+});
+
+    const hideSub = Keyboard.addListener(hideEvent, () => {
+        setKeyboardHeight(0);
+    setIsKeyboardVisible(false);
+});
 
     const initApp = async () => {
         const u = await SecureStore.getItemAsync('uEmail');
@@ -70,6 +80,15 @@ export default function App() {
         hideSub.remove();
     };
 }, []);
+
+    // Wzorzec z PoC: Ręczne przewijanie czatu na sam dół przy otwarciu klawiatury
+    useEffect(() => {
+        if (isKeyboardVisible && activeTab === 'chat') {
+        setTimeout(() => {
+            chatListRef.current?.scrollToEnd({ animated: true });
+    }, 300);
+    }
+}, [isKeyboardVisible, activeTab]);
 
     useEffect(() => {
         if (timeline.length > 0 && !initialScrollDone && activeTab === 'plan') {
@@ -89,9 +108,7 @@ export default function App() {
                     animated: true,
                     viewPosition: 0.5
                 });
-            } catch (error) {
-                console.log("Scroll to index failed, handled safely.", error);
-            }
+            } catch (error) {}
         }
     };
 
@@ -162,6 +179,7 @@ export default function App() {
                 msgArray.push({ side, senderInfo: rawTime, text: textMatch[2].replace(/<br\s*\/?>/gi, '\n').replace(/<[^>]*>/g, '').trim(), sortKey });
             }
         }
+        // W tym wzorcu rezygnujemy z odwracania (inverted). Standardowe renderowanie od góry do dołu.
         const sorted = msgArray.sort((a, b) => a.sortKey - b.sortKey);
         setMessages(sorted.slice(-15));
     };
@@ -208,8 +226,11 @@ export default function App() {
             const api = getApi();
             const params = new URLSearchParams({ id_zawodnik: userId, id_trener: ID_TRENER, tekst: newMessage.replace(/\n/g, '<br />'), flaga: FLAG });
             setNewMessage('');
+
             const res = await api.post('/zaliniamety/files/dodajChat.php', params.toString());
             if (res.data) parseMessages(res.data);
+
+            setTimeout(() => { chatListRef.current?.scrollToEnd({ animated: true }); }, 150);
         } catch (err) { Alert.alert("Error", "Message not sent."); }
     };
 
@@ -223,8 +244,8 @@ export default function App() {
     if (!isLoggedIn) {
         return (
             <View style={[styles.authView, { paddingTop: STATUSBAR_HEIGHT }]}>
-    <Text style={styles.heroTitle}>ElitePlan</Text>
-            <TextInput style={styles.input} placeholder="User" value={email} onChangeText={setEmail} placeholderTextColor="#475569" autoCapitalize="none" />
+    <Text style={styles.heroTitle}>#zaliniametyteam app</Text>
+        <TextInput style={styles.input} placeholder="User" value={email} onChangeText={setEmail} placeholderTextColor="#475569" autoCapitalize="none" />
             <TextInput style={styles.input} placeholder="Pass" value={password} onChangeText={setPassword} secureTextEntry placeholderTextColor="#475569" />
             <TouchableOpacity style={styles.loginBtn} onPress={() => handleLogin()}><Text style={styles.loginBtnText}>Login</Text></TouchableOpacity>
         </View>
@@ -232,6 +253,7 @@ export default function App() {
     }
 
     return (
+        // Usunięty KeyboardAvoidingView, główny kontener to najzwyklejsze View
         <View style={[styles.mainView, { paddingTop: STATUSBAR_HEIGHT }]}>
 <RNStatusBar barStyle="light-content" backgroundColor="#0f172a" />
 
@@ -257,12 +279,6 @@ export default function App() {
         </TouchableOpacity>
         </View>
 
-    {/* NAPRAWA: Zmienione behavior i KeyboardAvoidingView zamyka się PRZED Modalem */}
-<KeyboardAvoidingView
-    behavior={Platform.OS === 'ios' ? 'padding' : undefined}
-    style={{ flex: 1 }}
-    keyboardVerticalOffset={Platform.OS === 'ios' ? STATUSBAR_HEIGHT + 65 : 0}
-        >
         <View style={{ flex: 1 }}>
     {activeTab === 'plan' ? (
         <FlatList
@@ -303,7 +319,6 @@ export default function App() {
 
         let title = "";
         let details = "";
-        let accentColor = isRace ? "#fbbf24" : (isOtherOnly ? "#818cf8" : "#38bdf8");
 
         if (isOtherOnly) {
             title = others.map(o => (o.summaryObj.activityName || o.summaryObj.activityType).toUpperCase()).join(" + ");
@@ -366,14 +381,16 @@ export default function App() {
         />
     ) : (
     <View style={{ flex: 1 }}>
+        {/* Standardowa lista (bez inverted), zwija się od góry bo input ją wypycha */}
     <FlatList
         ref={chatListRef}
         data={messages}
         keyExtractor={(_, idx) => idx.toString()}
         style={{ flex: 1 }}
-        contentContainerStyle={{ padding: 15, paddingBottom: 40 }}
-        onContentSizeChange={() => chatListRef.current?.scrollToEnd({ animated: true })}
-        refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor="#38bdf8" colors={["#38bdf8"]} />}
+        contentContainerStyle={{ padding: 15, paddingBottom: 10 }}
+        onContentSizeChange={() => {
+        chatListRef.current?.scrollToEnd({ animated: true });
+    }}
         renderItem={({ item }) => (
     <View style={[styles.msgContainer, item.side === 'rightside' ? styles.msgRight : styles.msgLeft]}>
     <Text style={styles.msgTime}>{item.senderInfo}</Text>
@@ -383,15 +400,15 @@ export default function App() {
         </View>
     )}
         />
-        <View style={styles.inputWrapper}>
-        <TextInput
+        {/* Wzorzec z PoC: Wypychanie dolnym marginesem! */}
+    <View style={[styles.inputWrapper, { marginBottom: keyboardHeight }]}>
+    <TextInput
         style={styles.chatInput}
         placeholder="Message..."
         placeholderTextColor="#64748b"
         multiline
         value={newMessage}
         onChangeText={setNewMessage}
-        onFocus={() => setTimeout(() => chatListRef.current?.scrollToEnd({ animated: true }), 300)}
         />
         <TouchableOpacity style={styles.sendBtn} onPress={sendMessage}>
         <Ionicons name="send" size={18} color="#0f172a" />
@@ -401,24 +418,23 @@ export default function App() {
     )}
 </View>
 
+    {/* Dolne menu chowane przy aktywnej klawiaturze */}
     {!isKeyboardVisible && (
     <View style={styles.bottomNavContainer}>
-<View style={styles.tabBar}>
+        <View style={styles.tabBar}>
         <TouchableOpacity style={styles.tabItem} onPress={() => setActiveTab('plan')}>
-<Ionicons name={activeTab === 'plan' ? "calendar" : "calendar-outline"} size={26} color={activeTab === 'plan' ? '#38bdf8' : '#94a3b8'} />
+    <Ionicons name={activeTab === 'plan' ? "calendar" : "calendar-outline"} size={26} color={activeTab === 'plan' ? '#38bdf8' : '#94a3b8'} />
     <Text style={[styles.tabLabel, activeTab === 'plan' && styles.tabLabelActive]}>Plan</Text>
     </TouchableOpacity>
     <TouchableOpacity style={styles.tabItem} onPress={() => setActiveTab('chat')}>
-<Ionicons name={activeTab === 'chat' ? "chatbubbles" : "chatbubbles-outline"} size={26} color={activeTab === 'chat' ? '#38bdf8' : '#94a3b8'} />
+    <Ionicons name={activeTab === 'chat' ? "chatbubbles" : "chatbubbles-outline"} size={26} color={activeTab === 'chat' ? '#38bdf8' : '#94a3b8'} />
     <Text style={[styles.tabLabel, activeTab === 'chat' && styles.tabLabelActive]}>Chat</Text>
     </TouchableOpacity>
     </View>
     <View style={styles.androidBuffer} />
     </View>
     )}
-    </KeyboardAvoidingView>
 
-    {/* NAPRAWA: Modal wyciągnięty kompletnie NA ZEWNĄTRZ KeyboardAvoidingView */}
 <TrainingModal
     visible={!!selectedDate}
     date={selectedDate}
@@ -426,7 +442,6 @@ export default function App() {
     onClose={() => setSelectedDate(null)}
     onRefresh={onRefresh}
     />
-
     </View>
 );
 }
