@@ -17,6 +17,23 @@ Skupiliśmy się wyłącznie na najpotrzebniejszych funkcjach:
 
 ---
 
+## 📱 Ekrany Aplikacji
+
+<p align="center">
+  <img src="screens/App.j.png" width="220" alt="Ekran Logowania" style="margin: 10px;">
+  <img src="screens/App2.png" width="220" alt="Oś Czasu (Timeline)" style="margin: 10px;">
+  <img src="screens/App3.png" width="220" alt="Szczegóły Treningu i Garmin" style="margin: 10px;">
+  <img src="screens/App4.png" width="220" alt="Szczegóły Treningu i Garmin" style="margin: 10px;">
+  <img src="screens/App5.png" width="220" alt="Szczegóły Treningu i Garmin" style="margin: 10px;">
+  <img src="screens/Chat.png" width="220" alt="Czat z Trenerem" style="margin: 10px;">
+</p>
+
+*(Powyższe ekrany prezentują kolejno: Bezpieczne logowanie, zintegrowaną oś czasu, metrykę zsynchronizowaną z Garmin Connect oraz szybki czat z trenerem).*
+
+-
+
+---
+
 ## 📲 Jak zainstalować aplikację (Android)?
 
 Aplikacja znajduje się obecnie w dystrybucji zamkniętej i nie pobierzesz jej ze sklepu Google Play. Aby z niej korzystać, musisz pobrać plik instalacyjny `.apk` i jednorazowo zezwolić swojemu telefonowi na jego uruchomienie.
