@@ -16,8 +16,11 @@
       "bundleIdentifier": "com.ktsystems.eliteplan",
       "supportsTablet": true,
       "infoPlist": {
-          "LSApplicationQueriesSchemes": ["garminconnect"]
-        }
+        "LSApplicationQueriesSchemes": [
+          "garminconnect"
+        ],
+        "ITSAppUsesNonExemptEncryption": false
+      }
     },
     "android": {
       "package": "com.ktsystems.eliteplan",
