@@ -3,7 +3,7 @@
 Twoja podręczna, mobilna nakładka na platformę treningową **planbieganie.pl**. Aplikacja została stworzona po to, aby dać Ci najszybszy i najwygodniejszy dostęp do Twojego planu bezpośrednio z telefonu. 
 
 Instalka do pobrania:
-**[zaliniametyteam-app](https://github.com/tomaszkrajewski/zaliniametyteam-app/releases/download/beta-2026-04-03/zaliniametyteam-app.apk)
+**[zaliniametyteam-app](https://github.com/tomaszkrajewski/zaliniametyteam-app/releases/download/beta-2026-04-03/zaliniametyteam-app.apk)**
 
 *Uwaga: Aplikacja pobiera dane z głównego systemu platformy. Nie jest to samodzielny kombajn i nie znajdziesz w niej tak zaawansowanych wykresów czy map jak w samym Garmin Connect 😉. Jej głównym celem jest oszczędność Twojego czasu w codziennej, treningowej rutynie!*
 
